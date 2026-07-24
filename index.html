@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<!--
+  국가·지방 계약법령 비교 서비스 — 단일 HTML 파일 앱
+  주제 선택 → 법률·시행령·시행규칙 3계층을 한 화면에, 계층마다 좌=국가/우=지방 비교.
+  · 데이터는 data.json 에서 로드 (fetch-laws.js 가 법제처 API로 생성/갱신)
+  · 조문 데이터 구조: topics[].tiers[] = { key, label, articleNo, national, local }
+-->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 보안: 완전 자기완결 앱이라 외부 리소스를 막고 자기 출처만 허용(방어심층). 인라인 스타일/스크립트 사용으로 'unsafe-inline' 필요 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>국가·지방 계약법령 비교</title>
+  <style>
+    /* ===== 디자인 토큰 (남색 계열·가독성 우선) ===== */
+    :root {
+      --navy: #1a3a6b;
+      --navy-deep: #12294c;
+      --bg: #f4f6fa;
+      --card: #ffffff;
+      --border: #d7deea;
+      --text: #1f2733;
+      --muted: #6b7684;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", sans-serif;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ===== 헤더 ===== */
+    header {
+      background-color: var(--navy-deep);
+      color: #ffffff;
+      padding: 24px 32px;
+    }
+    header h1 { margin: 0; font-size: 24px; }
+    header p { margin: 6px 0 0; font-size: 14px; color: #c7d3e8; }
+    header p.notice { margin-top: 10px; font-size: 13px; color: #ffd9a8; }
+    header p.notice strong { color: #ffc078; }
+
+    /* ===== 본문 컨테이너 (PC 기준) ===== */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 32px;
+    }
+
+    /* ===== 주제 선택 바 ===== */
+    .topic-bar {
+      margin-bottom: 14px;
+      padding: 16px 20px;
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(18, 41, 76, 0.06);
+    }
+    .topic-bar label { font-weight: 600; color: var(--navy); margin-right: 8px; }
+    .topic-bar select {
+      font-size: 15px;
+      padding: 8px 12px;
+      color: var(--text);
+      background-color: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-width: 240px;
+      cursor: pointer;
+    }
+    .topic-bar select:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 2px rgba(26, 58, 107, 0.15);
+    }
+
+    /* 선택 전 안내 */
+    .empty-hint { color: var(--muted); padding: 32px 4px; text-align: center; }
+
+    /* ===== 계층 블록 (법률/시행령/시행규칙) ===== */
+    .tier { margin-bottom: 28px; }
+    .tier-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .tier-label {
+      margin: 0;
+      font-size: 16px;
+      color: var(--navy);
+      border-left: 4px solid var(--navy);
+      padding-left: 10px;
+      font-weight: 700;
+    }
+    /* 핵심 차이 요약 박스 */
+    .tier-summary {
+      margin-bottom: 14px;
+      padding: 12px 16px;
+      background: #eef3fb;
+      border: 1px solid #cfdcef;
+      border-left: 4px solid var(--navy);
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .tier-summary .ts-head { font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+    .tier-summary .ts-msg { margin: 0 0 8px; color: var(--text); }
+    .tier-summary .ts-list { margin: 0 0 8px; padding-left: 18px; }
+    .tier-summary .ts-list li { margin: 5px 0; line-height: 1.7; }
+    .tier-summary .ts-cat {
+      display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+      background: var(--navy); border-radius: 3px; padding: 1px 6px; margin-right: 3px;
+    }
+    .tier-summary .ts-list .q {
+      background: #ffffff; border: 1px solid #cfdcef; border-radius: 3px;
+      padding: 0 5px; word-break: keep-all;
+    }
+    .tier-summary .ts-more { margin: 0 0 4px; color: var(--muted); }
+    .tier-summary .ts-disc { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    /* 행위 분류별 제재기간 대조 테이블 */
+    .tier-summary .act-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 4px 0 10px;
+      font-size: 13px;
+      background: #ffffff;
+    }
+    .tier-summary .act-table th, .tier-summary .act-table td {
+      border: 1px solid #cfdcef;
+      padding: 6px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .tier-summary .act-table thead th {
+      background: #dbe6f5;
+      color: var(--navy);
+      font-weight: 700;
+    }
+    .tier-summary .act-table tbody td:first-child { font-weight: 600; color: var(--navy); }
+    /* 국가≠지방인 행의 국가·지방 셀을 살짝 강조 */
+    .tier-summary .act-table tr.diff-row td:nth-child(2),
+    .tier-summary .act-table tr.diff-row td:nth-child(3) { background: #fff7e6; }
+
+    /* "차이 없음" 배지 (초록 — 강조색·테마색과 구분) */
+    .badge-same {
+      display: inline-block;
+      padding: 3px 12px;
+      background-color: #e6f4ea;
+      color: #1e7d43;
+      border: 1px solid #b7e0c4;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* 핵심 차이 표 제목 옆 "차이 N건" 배지 (앰버 — diff-row 강조색과 통일) */
+    .diff-count {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 10px;
+      background-color: #fff7e6;
+      color: #9a6a00;
+      border: 1px solid #f0d9a8;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      vertical-align: middle;
+    }
+    .diff-count.is-zero {
+      background-color: #e6f4ea;
+      color: #1e7d43;
+      border-color: #b7e0c4;
+    }
+
+    /* ===== 좌우 비교 2칼럼 ===== */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .column {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--navy);
+      border-radius: 8px;
+      padding: 20px 24px;
+      box-shadow: 0 1px 4px rgba(18, 41, 76, 0.06);
+    }
+    .column .col-title {
+      margin: 0 0 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 16px;
+      color: var(--navy);
+    }
+    .column .col-title .art-no { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+    /* 조문 본문 */
+    .column .article {
+      margin: 0;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.85;
+      white-space: pre-wrap;
+      word-break: keep-all;
+    }
+    .column .article.empty { color: var(--muted); font-style: italic; }
+    /* 참조 별표(표) — 접이식 블록 (기본 접힘) */
+    .column .table-block {
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #f7f9fc;
+    }
+    .column .table-block > summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--navy);
+      list-style: none;          /* 기본 삼각형 마커 숨김 → 커스텀 사용 */
+      user-select: none;
+    }
+    .column .table-block > summary::-webkit-details-marker { display: none; }
+    .column .table-block > summary::before { content: "▸ "; }
+    .column .table-block[open] > summary::before { content: "▾ "; }
+    .column .table-block[open] > summary { border-bottom: 1px solid var(--border); }
+    /* 펼친 표 본문 — 고정폭, 높이 제한 + 세로·가로 스크롤 */
+    .column .table-content {
+      margin: 0;
+      max-height: 420px;
+      overflow: auto;
+      font-family: Consolas, "D2Coding", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre;
+      padding: 10px 12px;
+      color: var(--text);
+    }
+
+    /* ===== 주제별 '동향 살펴보기' 패널 (접이식, 공식 출처 링크) ===== */
+    .trend-panel {
+      margin: 0 0 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f7f9fc;
+    }
+    .trend-panel > summary {
+      cursor: pointer;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--navy);
+      list-style: none;
+      user-select: none;
+    }
+    .trend-panel > summary::-webkit-details-marker { display: none; }
+    .trend-panel > summary::before { content: "▸ "; }
+    .trend-panel[open] > summary::before { content: "▾ "; }
+    .trend-panel[open] > summary { border-bottom: 1px solid var(--border); }
+    .trend-body { padding: 12px 16px 16px; }
+    .trend-body .trend-refs { margin: 0 0 10px; font-size: 13px; color: var(--text); }
+    .trend-links { list-style: none; margin: 0; padding: 0; }
+    .trend-links li { margin: 6px 0; }
+    .trend-links a {
+      display: inline-block;
+      color: var(--navy);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      border-bottom: 1px solid transparent;
+    }
+    .trend-links a:hover { border-bottom-color: var(--navy); }
+    .trend-links a::after { content: " ↗"; font-size: 12px; color: var(--muted); }
+    .trend-links .src { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+    .trend-note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+
+    /* ===== 하단 안내 ===== */
+    footer {
+      max-width: 1200px;
+      margin: 8px auto 0;
+      padding: 18px 32px 32px;
+      font-size: 12px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>국가·지방 계약법령 비교</h1>
+    <p>주제를 고르면 법률·시행령·시행규칙 3계층에서 국가계약법령(좌)과 지방계약법령(우)을 나란히 비교합니다.</p>
+    <p class="notice" id="data-notice" hidden></p>
+  </header>
+
+  <main>
+    <div class="topic-bar">
+      <label for="topic-select">비교 주제</label>
+      <select id="topic-select"></select>
+    </div>
+
+    <!-- 계층별 비교 블록이 이 안에 동적으로 채워진다 -->
+    <div id="compare-root">
+      <p class="empty-hint">위에서 비교할 주제를 선택하세요.</p>
+    </div>
+  </main>
+
+  <footer>
+    출처: 국가법령정보 공동활용 API(법제처) · 좌=국가계약법령(재정경제부 소관) / 우=지방계약법령(행정안전부 소관) ·
+    이 화면은 PC(데스크톱) 사용에 최적화되어 있습니다.
+  </footer>
+
+  <script>
+    // ===== 데이터 로딩 (A안: 빌드타임 수집) =====
+    // data.json 구조: { source, generatedAt, topics: [{ id, title, tiers: [{ key, label, articleNo, national, local }] }] }
+    //   - national/local: 조문 텍스트(문자열), 대응 조항이 없으면 null (→ "해당 조항 없음")
+    // file:// 로 직접 열면 fetch 가 막히므로, 로컬 서버(node serve.js)로 열어야 한다.
+    let LAW_DATA = [];
+
+    // 계층별 칼럼 제목(법령명) — 법률/시행령/시행규칙에 따라 다르게 표기
+    const TIER_LAW_NAMES = {
+      law:    { national: "국가계약법",       local: "지방계약법" },
+      decree: { national: "국가계약법시행령", local: "지방계약법시행령" },
+      rule:   { national: "국가계약법시행규칙", local: "지방계약법시행규칙" }
+    };
+
+    // 주제별 '동향 살펴보기'용 공식 출처 링크 — 실시간 수집이 아니라, 새 탭으로 공식 사이트로 이동만 한다.
+    // (CSP·비범위 준수: 앱은 외부를 fetch 하지 않으며, 담당자가 링크를 눌러 직접 동향을 확인한다.)
+    const TREND_LINKS = [
+      { url: "https://www.law.go.kr/법령/국가를당사자로하는계약에관한법률", label: "국가법령정보센터 — 국가계약법(본문·개정 연혁)", src: "법제처" },
+      { url: "https://www.law.go.kr/법령/지방자치단체를당사자로하는계약에관한법률", label: "국가법령정보센터 — 지방계약법(본문·개정 연혁)", src: "법제처" },
+      { url: "https://likms.assembly.go.kr/bill/main.do", label: "국회 의안정보시스템 — 계약법 개정안·발의 동향 검색", src: "국회" },
+      { url: "https://opinion.lawmaking.go.kr/", label: "국민참여입법센터 — 입법예고 검색", src: "법제처" }
+    ];
+
+    // 선택 주제의 '동향 살펴보기' 접이식 패널을 만든다(관련 조문 안내 + 공식 출처 링크).
+    function buildTrendPanel(item) {
+      const details = document.createElement("details");
+      details.className = "trend-panel";
+      const summary = document.createElement("summary");
+      summary.textContent = "📈 " + item.title + " — 최근 입법·정책 동향 살펴보기";
+      details.appendChild(summary);
+
+      const body = document.createElement("div");
+      body.className = "trend-body";
+
+      // 이 주제와 연결된 조문(국가/지방)을 data.json 매핑에서 구성 — 어디를 볼지 짚어준다.
+      const nat = [], loc = [];
+      (item.tiers || []).forEach(function (t) {
+        const names = TIER_LAW_NAMES[t.key] || {};
+        const a = t.articleNo || {};
+        if (a.national) nat.push(names.national + " " + formatArtNo(a.national));
+        if (a.local) loc.push(names.local + " " + formatArtNo(a.local));
+      });
+      const refs = document.createElement("p");
+      refs.className = "trend-refs";
+      refs.textContent = "이 주제 관련 조문 — 국가: " + (nat.join(" · ") || "—") +
+        " / 지방: " + (loc.join(" · ") || "—") +
+        ". 아래 공식 출처에서 '" + item.title + "'의 개정·발의 동향을 확인하세요.";
+      body.appendChild(refs);
+
+      const ul = document.createElement("ul");
+      ul.className = "trend-links";
+      TREND_LINKS.forEach(function (lk) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = encodeURI(lk.url);      // 한글 경로를 안전하게 인코딩
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";   // 새 탭 보안(opener 차단)
+        a.textContent = lk.label;
+        const src = document.createElement("span");
+        src.className = "src";
+        src.textContent = "[" + lk.src + "]";
+        li.appendChild(a);
+        li.appendChild(src);
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+
+      const note = document.createElement("p");
+      note.className = "trend-note";
+      note.textContent = "※ 외부 공식 사이트로 새 탭 이동합니다. 이 앱은 뉴스·동향을 실시간 자동 수집하지 않으며, 링크는 담당자가 직접 확인하는 출발점입니다.";
+      body.appendChild(note);
+
+      details.appendChild(body);
+      return details;
+    }
+
+    const topicSelect = document.getElementById("topic-select");
+    const dataNotice = document.getElementById("data-notice");
+    const compareRoot = document.getElementById("compare-root");
+
+    // 두 단어 배열을 LCS로 비교해 서로 다른 단어에 true 플래그를 매긴다.
+    function diffWords(aWords, bWords) {
+      const n = aWords.length, m = bWords.length;
+      const dp = Array.from({ length: n + 1 }, function () { return new Array(m + 1).fill(0); });
+      for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+          dp[i][j] = aWords[i] === bWords[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const aDiff = new Array(n).fill(true), bDiff = new Array(m).fill(true);
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (aWords[i] === bWords[j]) { aDiff[i] = false; bDiff[j] = false; i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
+        else { j++; }
+      }
+      return { aDiff: aDiff, bDiff: bDiff };
+    }
+
+    // 조문번호 표기 정리: "27" → "제27조", "27의2" → "제27조의2"
+    function formatArtNo(no) {
+      const s = String(no);
+      const idx = s.indexOf("의");
+      if (idx >= 0) return "제" + s.slice(0, idx) + "조의" + s.slice(idx + 1);
+      return "제" + s + "조";
+    }
+
+    // 한 칼럼 DOM 생성: 제목(법령명 + 조문번호) + 조문 본문 자리
+    function makeColumn(title, artNo) {
+      const col = document.createElement("div");
+      col.className = "column";
+      const h = document.createElement("h4");
+      h.className = "col-title";
+      h.textContent = title;
+      if (artNo) {
+        const span = document.createElement("span");
+        span.className = "art-no";
+        span.textContent = formatArtNo(artNo);
+        h.appendChild(span);
+      }
+      const body = document.createElement("div");
+      body.className = "col-body";
+      col.appendChild(h);
+      col.appendChild(body);
+      return { col: col, body: body };
+    }
+
+    // 한 쪽(국가/지방) 조문 + 참조 별표를 칼럼 본문에 렌더한다.
+    function renderSide(bodyEl, side) {
+      bodyEl.innerHTML = "";
+      const text = side ? side.text : null;
+      const p = document.createElement("p");
+      p.className = "article";
+      if (text === null || text === undefined) {
+        p.textContent = "해당 조항 없음";
+        p.classList.add("empty");
+        bodyEl.appendChild(p);
+        return;
+      }
+      p.textContent = text;
+      bodyEl.appendChild(p);
+      // 참조 별표(표)는 접이식(details)으로 — 기본 접힘, 클릭 시 펼침. 차이 하이라이트 없음.
+      (side.tables || []).forEach(function (t) {
+        const details = document.createElement("details");
+        details.className = "table-block";
+        const summary = document.createElement("summary");
+        summary.className = "table-title";
+        summary.textContent = "별표 · " + t.title;
+        const pre = document.createElement("pre");
+        pre.className = "table-content";
+        pre.textContent = t.content;
+        details.appendChild(summary);
+        details.appendChild(pre);
+        bodyEl.appendChild(details);
+      });
+    }
+
+    // 좌우 칼럼을 채운다(조문 원문 + 참조 별표). 조문 텍스트가 같으면 "차이 없음" 배지.
+    function fillPair(natBody, locBody, natSide, locSide, head) {
+      renderSide(natBody, natSide);
+      renderSide(locBody, locSide);
+      // "차이 없음" 배지: 양쪽 조문 텍스트가 있고 완전히 같을 때 (별표는 판정에서 제외)
+      const nt = natSide ? natSide.text : null;
+      const lt = locSide ? locSide.text : null;
+      if (nt !== null && nt !== undefined && lt !== null && lt !== undefined) {
+        const d = diffWords(nt.split(/\s+/), lt.split(/\s+/));
+        const diffCount = d.aDiff.filter(Boolean).length + d.bDiff.filter(Boolean).length;
+        if (diffCount === 0) {
+          const badge = document.createElement("span");
+          badge.className = "badge-same";
+          badge.textContent = "차이 없음";
+          head.appendChild(badge);
+        }
+      }
+    }
+
+    // 요약 DOM 헬퍼
+    function txt(s) { return document.createTextNode(s); }
+    function quote(s) { const el = document.createElement("span"); el.className = "q"; el.textContent = s; return el; }
+
+    // ── 정량적 제재수준 차원 추출 ──
+    // 조문 텍스트는 '문맥 키워드'가 근처에 있을 때만(납부기한·처분일 등 부수 수치 배제),
+    // 별표는 '제목'으로 차원을 판별(표 전체가 그 차원)한다.
+    const SANCTION_ORDER = ["제재기간", "과징금율", "지체상금률", "한도", "벌점"];
+    const NUM = {
+      기간:  "\\d+\\s*(?:년|개월)",
+      율:    "(?:100\\s*분의\\s*\\d+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?\\s*(?:%|퍼센트))",
+      율천:  "1\\s*(?:000|천)\\s*분의\\s*\\d+(?:\\.\\d+)?",
+      벌점:  "\\d+\\s*점"
+    };
+    function normNum(x) { return x.replace(/\s+/g, ""); }
+    function matchAll(text, numSrc) {
+      const out = [], re = new RegExp(numSrc, "g"); let m;
+      while ((m = re.exec(text))) out.push(normNum(m[0]));
+      return out;
+    }
+    // 숫자 매치 주변(±win)에 문맥 키워드가 있을 때만 채택
+    function matchNear(text, numSrc, ctx, win) {
+      const out = [], re = new RegExp(numSrc, "g"); let m;
+      while ((m = re.exec(text))) {
+        const a = Math.max(0, m.index - win), b = m.index + m[0].length + win;
+        if (ctx.test(text.slice(a, b))) out.push(normNum(m[0]));
+      }
+      return out;
+    }
+    // 보증금율: '보증금' 뒤 '100분의 N 이상'(기본율)을 우선, 없으면 첫 '100분의 N'
+    function guaranteeRates(text) {
+      const i = text.search(/보증금/);
+      if (i < 0) return [];
+      const rest = text.slice(i);
+      const m = rest.match(/100\s*분의\s*\d+(?:\.\d+)?(?=\s*이상)/);   // '이상'이 붙은 것 = 최저 보증금율
+      if (m) return [m[0].replace(/\s+/g, " ").trim()];
+      const m2 = rest.match(/100\s*분의\s*\d+(?:\.\d+)?/);
+      return m2 ? [m2[0].replace(/\s+/g, " ").trim()] : [];
+    }
+    // 집행정지 결정 후 낙찰 시 계약보증금 '추가 납부' 규정 유무 (국가 신설 2026.5.12 vs 지방 미규정)
+    // 조문에 '집행정지' + '추가로 납부'가 함께 있으면 규정 있음으로 보고, 추가 비율(100분의 N)을 추출.
+    function extraDepositOnStay(text) {
+      if (!/집행정지/.test(text) || !/추가로?\s*납부/.test(text)) return null;
+      const m = text.match(/100\s*분의\s*(\d+)\s*만큼\s*추가로/);
+      return m ? ("있음 (100분의 " + m[1] + " 추가)") : "있음";
+    }
+    // 보증금 납부수단 / 면제·대상 키워드 (조문 텍스트에서 존재 여부로 대조)
+    const GUARANTEE_PAY = [
+      { label: "현금", re: /현금/ }, { label: "수표", re: /수표/ },
+      { label: "국·공채", re: /국채|지방채|공채/ }, { label: "증권", re: /증권/ },   // '상장증권'도 포함 → 표기차 허위 차이 방지
+      { label: "보증서", re: /보증서/ }, { label: "보증보험", re: /보증보험/ },
+      { label: "정기예금", re: /정기예금/ }, { label: "신탁", re: /신탁/ }
+    ];
+    const GUARANTEE_TGT = [
+      { label: "국가기관", re: /국가기관/ }, { label: "지방자치단체", re: /지방자치단체/ },
+      { label: "공공기관·공기업", re: /공공기관|공기업/ }, { label: "외국정부", re: /외국정부/ }   // 병합 → 표기차 허위 차이 방지
+    ];
+    function pickKw(text, set) { return set.filter(function (k) { return k.re.test(text); }).map(function (k) { return k.label; }); }
+    // 한 측면(납부수단/면제) 대조: 한쪽이 '준용'으로 비면 오대조 대신 '준용'으로 처리
+    function aspectCompare(natText, locText, kwSet) {
+      const nk = pickKw(natText, kwSet), lk = pickKw(locText, kwSet);
+      if (nk.join() === lk.join()) return { nat: nk.join("·") || "—", loc: lk.join("·") || "—", same: true };
+      // 값이 다른데 한쪽이라도 '준용'이 있으면 조문 표면 대조가 불완전 → 강조하지 않고 빈쪽은 '준용'으로 표기
+      if (/준용/.test(natText) || /준용/.test(locText)) {
+        return { nat: nk.length ? nk.join("·") : "다른 조문 준용", loc: lk.length ? lk.join("·") : "다른 조문 준용", same: true };
+      }
+      return { nat: nk.join("·") || "—", loc: lk.join("·") || "—", same: false };
+    }
+    // 한 쪽(국가/지방)의 제재수준 차원별 값. 조항 없으면 null.
+    function sanctionMap(side) {
+      if (!side || side.text == null) return null;
+      const map = { "제재기간": new Set(), "과징금율": new Set(), "지체상금률": new Set(), "한도": new Set(), "벌점": new Set() };
+      const add = function (kind, arr) { arr.forEach(function (v) { map[kind].add(v); }); };
+      const art = side.text;
+      // 조문 텍스트: 문맥 키워드 기반
+      // 제재기간은 '이내'(제재 상한 표현) 근처만 → 제척기간(5년 지난/경과) 오분류 배제
+      add("제재기간", matchNear(art, NUM.기간, /이내/, 8));
+      add("과징금율", matchNear(art, NUM.율, /(과징금|부과)/, 18));
+      add("지체상금률", matchAll(art, NUM.율천).map(normRate));   // '1천분의' → '1000분의' 정규화
+      add("한도", matchNear(art, NUM.율, /(한도|초과|넘)/, 14));
+      add("벌점", matchNear(art, NUM.벌점, /벌점/, 14));
+      // 별표: 제목으로 차원 판별 (표 전체가 그 차원)
+      (side.tables || []).forEach(function (t) {
+        const title = t.title || "", c = t.content;
+        if (/제한기준/.test(title)) { add("제재기간", matchAll(c, NUM.기간)); add("벌점", matchAll(c, NUM.벌점)); }
+        if (/과징금/.test(title)) { add("과징금율", matchAll(c, NUM.율)); add("벌점", matchAll(c, NUM.벌점)); }
+        if (/지체상금률|지연배상금률/.test(title)) { add("지체상금률", matchAll(c, NUM.율천)); }
+      });
+      const out = {};
+      SANCTION_ORDER.forEach(function (k) { out[k] = Array.from(map[k]); });
+      return out;
+    }
+
+    // ── 입찰참가자격 제한기준 별표: 행위 분류별 제재기간 대조 ──
+    const ACT_CATEGORIES = [
+      { key: "부실시공", kw: /부실/ },
+      { key: "하자", kw: /하자비율/ },                                  // '하자보수의무' 등 오매칭 방지
+      { key: "담합", kw: /담합/ },
+      { key: "하도급", kw: /하도급/ },
+      { key: "손해", kw: /손해/ },
+      { key: "뇌물·금품", kw: /뇌물|금품|재산상\s*이익/ },
+      { key: "안전조치 위반", kw: /산업안전|안전ㆍ보건|안전·보건|사망/ },   // '안전도의 위해' 등 오매칭 방지
+      { key: "서류 위조·부정", kw: /위조|변조/ }
+    ];
+    function periodToMonths(p) { let mo = 0, m; m = p.match(/(\d+)\s*년/); if (m) mo += +m[1] * 12; m = p.match(/(\d+)\s*개월/); if (m) mo += +m[1]; return mo; }
+    function monthsToLabel(mo) { const y = Math.floor(mo / 12), m = mo % 12; return (y ? y + "년" : "") + (m ? (y ? " " : "") + m + "개월" : "") || "-"; }
+    function rangeLabel(arr) {
+      if (!arr || !arr.length) return "—";
+      const mn = Math.min.apply(null, arr), mx = Math.max.apply(null, arr);
+      return mn === mx ? monthsToLabel(mn) : monthsToLabel(mn) + "~" + monthsToLabel(mx);
+    }
+    // 지체상금 계약 종류 (제75조 각 호)
+    const CONTRACT_TYPES = [
+      { key: "공사", kw: /공사/ },
+      { key: "물품 제조·구매", kw: /물품의 제조|물품제조/ },
+      { key: "용역", kw: /용역/ },
+      { key: "군용 음식료품", kw: /음[ㆍ·\s]*식료품/ },
+      { key: "운송·보관·양곡가공", kw: /운송|보관|양곡/ }
+    ];
+    // 별표(박스표) 파싱: 개별기준 항목 헤더(줄 시작 "숫자.")에서 카테고리 리셋+재판정,
+    // 하위 행(가./나.)의 키워드도 반영(담합 등은 하위 행에만 있음). '일반기준·계약이행' 등 비대상 항목은 누수 방지로 제외.
+    function parseCategoryValues(content, cats, valRe) {
+      const out = {}; cats.forEach(function (c) { out[c.key] = []; });
+      let cur = null;
+      content.split("\n").forEach(function (line) {
+        if (/^\s*│?\s*\d+\.\s/.test(line)) {          // 새 항목 헤더 → 리셋 후 재판정
+          cur = null;
+          for (let i = 0; i < cats.length; i++) { if (cats[i].kw.test(line)) { cur = cats[i].key; break; } }
+        } else {                                       // 하위 행 → 키워드 있으면 갱신
+          for (let i = 0; i < cats.length; i++) { if (cats[i].kw.test(line)) { cur = cats[i].key; break; } }
+        }
+        if (!cur) return;
+        const f = line.match(valRe); if (f) out[cur].push.apply(out[cur], f);
+      });
+      cats.forEach(function (c) { out[c.key] = Array.from(new Set(out[c.key])); });
+      return out;
+    }
+    // 특정 제목의 별표 content 합치기
+    function tablesText(side, titleRe) {
+      return (side && side.tables ? side.tables : []).filter(function (t) { return titleRe.test(t.title || ""); }).map(function (t) { return t.content; }).join("\n");
+    }
+    // 값 라벨러
+    function periodRangeLabel(vals) { return rangeLabel(vals ? vals.map(periodToMonths) : null); }
+    function percentRangeLabel(vals) {
+      if (!vals || !vals.length) return "—";
+      const n = vals.map(function (x) { return parseFloat(x); });
+      const mn = Math.min.apply(null, n), mx = Math.max.apply(null, n);
+      return mn === mx ? mn + "%" : mn + "%~" + mx + "%";
+    }
+    // 지체상금 요율: 국가 '1천분의' → '1000분의' 정규화, 소수점 뒤 마침표 제거
+    function normRate(s) { return s.replace(/1\s*천\s*분의/g, "1000분의").replace(/\s+/g, "").replace(/\.$/, ""); }
+    // 조문(제75조)을 각 호("1. "~"9. ")로 분할해 계약 종류별 요율 수집.
+    // (단일자리 항목번호만 분할 → '0.75.' 같은 소수점 오분할 방지)
+    function contractBreakdown(text) {
+      const out = {}; CONTRACT_TYPES.forEach(function (c) { out[c.key] = []; });
+      (text || "").split(/\s+(?=[1-9]\.\s)/).forEach(function (chunk) {
+        let cat = null;
+        for (let i = 0; i < CONTRACT_TYPES.length; i++) { if (CONTRACT_TYPES[i].kw.test(chunk)) { cat = CONTRACT_TYPES[i].key; break; } }
+        if (!cat) return;
+        const r = (chunk.match(/1\s*(?:000|천)\s*분의\s*\d+(?:\.\d+)?/g) || []).map(normRate);
+        out[cat].push.apply(out[cat], r);
+      });
+      CONTRACT_TYPES.forEach(function (c) { out[c.key] = Array.from(new Set(out[c.key])); });
+      return out;
+    }
+    // 범용 대조 테이블 (rows: [{label, nat, loc}]) — 국가≠지방 행 강조
+    function buildBreakdownTable(title, col0, rows, note) {
+      const frag = document.createDocumentFragment();
+      const h = document.createElement("p"); h.className = "ts-msg"; h.textContent = title; frag.appendChild(h);
+      const table = document.createElement("table"); table.className = "act-table";
+      const thead = document.createElement("thead"), htr = document.createElement("tr");
+      [col0, "국가", "지방"].forEach(function (t) { const th = document.createElement("th"); th.textContent = t; htr.appendChild(th); });
+      thead.appendChild(htr); table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      let diffCount = 0;   // 국가≠지방인 행 수 — 표 제목 옆 배지로 표시
+      rows.forEach(function (r) {
+        const tr = document.createElement("tr");
+        // r.same 명시되면 그에 따라, 아니면 값이 다르면 강조
+        const diff = (r.same === true) ? false : (r.same === false ? true : (r.nat !== r.loc));
+        if (diff) { tr.className = "diff-row"; diffCount++; }
+        [r.label, r.nat, r.loc].forEach(function (v) { const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
+        tbody.appendChild(tr);
+      });
+      // 제목 옆에 "차이 N건"(차이 없으면 초록 "차이 없음") 배지 — 표를 훑기 전에 차이 규모를 한눈에
+      const badge = document.createElement("span");
+      badge.className = diffCount ? "diff-count" : "diff-count is-zero";
+      badge.textContent = diffCount ? ("차이 " + diffCount + "건") : "차이 없음";
+      h.appendChild(badge);
+      table.appendChild(tbody); frag.appendChild(table);
+      if (note) { const p = document.createElement("p"); p.className = "ts-more"; p.textContent = note; frag.appendChild(p); }
+      return frag;
+    }
+    // 주제별 분류 대조: { kind(요약에서 제외할 sanction), frag } 또는 null
+    function getBreakdown(topicId, natSide, locSide) {
+      if (!natSide || !locSide || natSide.text == null || locSide.text == null) return null;
+      const PERIOD = /\d+\s*년(?:\s*\d+\s*개월)?|\d+\s*개월/g, PCT = /\d+(?:\.\d+)?\s*%/g;
+      const notEmpty = function (r) { return r.nat !== "—" || r.loc !== "—"; };
+
+      if (topicId === "bid-restriction") {
+        const nT = tablesText(natSide, /제한기준/), lT = tablesText(locSide, /제한기준/);
+        if (!nT || !lT) return null;
+        const nc = parseCategoryValues(nT, ACT_CATEGORIES, PERIOD), lc = parseCategoryValues(lT, ACT_CATEGORIES, PERIOD);
+        const rows = ACT_CATEGORIES.map(function (c) { return { label: c.key, nat: periodRangeLabel(nc[c.key]), loc: periodRangeLabel(lc[c.key]) }; }).filter(notEmpty);
+        const note = /이상[\s\S]{0,8}이하|이상[\s\S]{0,8}미만/.test(lT) ? "규정 방식 차이: 국가는 고정값, 지방은 범위(예: 1년 6개월 이상 2년 이하)로 규정합니다. 위 값은 각 분류의 최소~최대 범위입니다." : "";
+        return { kind: "제재기간", frag: buildBreakdownTable("행위 분류별 입찰참가자격 제한기간 (국가 vs 지방):", "행위 분류", rows, note) };
+      }
+      if (topicId === "penalty-surcharge") {
+        const nT = tablesText(natSide, /과징금/), lT = tablesText(locSide, /과징금/);
+        if (!nT || !lT) return null;
+        const nc = parseCategoryValues(nT, ACT_CATEGORIES, PCT), lc = parseCategoryValues(lT, ACT_CATEGORIES, PCT);
+        const rows = ACT_CATEGORIES.map(function (c) { return { label: c.key, nat: percentRangeLabel(nc[c.key]), loc: percentRangeLabel(lc[c.key]) }; }).filter(notEmpty);
+        return { kind: "과징금율", frag: buildBreakdownTable("사유 분류별 과징금 부과율 (국가 vs 지방):", "사유 분류", rows, "부과율은 별표 3(책임 경미)·별표 4(유효경쟁 미성립)의 벌점·비율별 값 범위입니다.") };
+      }
+      if (topicId === "delay-damages") {
+        const nb = contractBreakdown(natSide.text), lb = contractBreakdown(locSide.text);
+        const rows = CONTRACT_TYPES.map(function (c) { return { label: c.key, nat: nb[c.key].join(", ") || "—", loc: lb[c.key].join(", ") || "—" }; }).filter(notEmpty);
+        if (!rows.length) return null;
+        return { kind: "지체상금률", frag: buildBreakdownTable("계약 종류별 지체상금률(지연배상금률) (국가 vs 지방):", "계약 종류", rows, "국가는 '1천분의', 지방은 '1000분의'로 표기하나 비율 의미는 같습니다.") };
+      }
+      return null;
+    }
+
+    // 보증금 주제: 법률·시행령·시행규칙을 '통합'한 하나의 핵심 차이 표(요율·납부수단·면제/대상)
+    function buildGuaranteeSummary(topicId, tiers) {
+      const natText = tiers.map(function (t) { return t.national.text || ""; }).join(" ");
+      const locText = tiers.map(function (t) { return t.local.text || ""; }).join(" ");
+      const rows = [];
+      const nr = guaranteeRates(natText), lr = guaranteeRates(locText);
+      if (nr.length || lr.length) rows.push({ label: "요율(보증금율)", nat: nr.join(", ") || "—", loc: lr.join(", ") || "—", same: nr.join() === lr.join() });
+      // 집행정지 후 낙찰 시 계약보증금 추가 납부(국가 신설) — 한쪽만 있으면 차이로 표시
+      const ns = extraDepositOnStay(natText), ls = extraDepositOnStay(locText);
+      if (ns || ls) rows.push({ label: "집행정지 후 낙찰 시 추가 납부", nat: ns || "규정 없음", loc: ls || "규정 없음", same: (!!ns === !!ls) });
+      // 납부수단·면제: 준용 처리 + 표기 정규화로 허위 차이 방지
+      const pay = aspectCompare(natText, locText, GUARANTEE_PAY);
+      if (pay.nat !== "—" || pay.loc !== "—") rows.push({ label: "납부수단", nat: pay.nat, loc: pay.loc, same: pay.same });
+      const tgt = aspectCompare(natText, locText, GUARANTEE_TGT);
+      if (tgt.nat !== "—" || tgt.loc !== "—") rows.push({ label: "면제·대상", nat: tgt.nat, loc: tgt.loc, same: tgt.same });
+      if (!rows.length) return null;
+      const box = document.createElement("div");
+      box.className = "tier-summary";
+      const head = document.createElement("div");
+      head.className = "ts-head";
+      head.textContent = "핵심 차이 — 보증금 (요율·절차·대상 · 3계층 통합)";
+      box.appendChild(head);
+      box.appendChild(buildBreakdownTable("국가 vs 지방:", "구분", rows, "법률·시행령·시행규칙을 통합한 키워드 기준 사실 대조입니다. 준용·참조 항목은 조문 표면에 안 나타날 수 있으니 아래 좌우 조문도 함께 확인하세요."));
+      return box;
+    }
+
+    // 한 계층의 '핵심 차이 — 제재수준' 박스: 같은 사안에 국가/지방 제재 강도가 다른 것만 표시.
+    function buildTierSummary(natSide, locSide, topicId) {
+      const box = document.createElement("div");
+      box.className = "tier-summary";
+      const head = document.createElement("div");
+      head.className = "ts-head";
+      head.textContent = "핵심 차이 — 제재수준 (국가 vs 지방 · 3계층 통합)";
+      box.appendChild(head);
+
+      const msg = document.createElement("p");
+      msg.className = "ts-msg";
+      const nat = sanctionMap(natSide);
+      const loc = sanctionMap(locSide);
+
+      if (nat == null && loc == null) { msg.textContent = "양쪽 모두 해당 조항이 없습니다."; box.appendChild(msg); return box; }
+      if (nat == null) { msg.textContent = "국가에는 해당 조항이 없고, 지방에만 규정되어 있습니다."; box.appendChild(msg); return box; }
+      if (loc == null) { msg.textContent = "지방에는 해당 조항이 없고, 국가에만 규정되어 있습니다."; box.appendChild(msg); return box; }
+
+      // 주제별 분류 대조(입찰=행위별 기간 / 과징금=사유별 부과율 / 지체=계약종류별 요율).
+      // (보증금 주제는 buildGuaranteeSummary로 통합 표시하므로 buildTierSummary를 호출하지 않는다.)
+      const bd = getBreakdown(topicId, natSide, locSide);
+      const hasBd = !!bd;
+      const diffs = [];
+      SANCTION_ORDER.forEach(function (kind) {
+        if (hasBd && kind === bd.kind) return;  // 분류 대조 표로 대체
+        const a = nat[kind], b = loc[kind];
+        const aOnly = a.filter(function (x) { return b.indexOf(x) === -1; });
+        const bOnly = b.filter(function (x) { return a.indexOf(x) === -1; });
+        if (aOnly.length || bOnly.length) diffs.push({ kind: kind, aOnly: aOnly, bOnly: bOnly, both: (aOnly.length > 0 && bOnly.length > 0) });
+      });
+
+      if (diffs.length === 0 && !hasBd) {
+        msg.textContent = "이 계층에서 국가·지방의 제재수준(기간·율·금액·벌점) 규정은 동일합니다. (문구·절차상 차이는 아래 원문 참조)";
+        box.appendChild(msg);
+        return box;
+      }
+
+      const CAP = 10;
+      const joinVals = function (arr) { return arr.length ? arr.slice(0, CAP).join(", ") + (arr.length > CAP ? " 외" : "") : "—"; };
+
+      // (1) 주제별 분류 대조 표
+      if (hasBd) box.appendChild(bd.frag);
+
+      // (2) 그 밖의 제재수준(과징금율·지체상금률·한도·벌점 등) 차이
+      if (diffs.length) {
+        diffs.sort(function (x, y) { return (y.both ? 1 : 0) - (x.both ? 1 : 0); });
+        const msg2 = document.createElement("p");
+        msg2.className = "ts-msg";
+        msg2.textContent = hasBd ? "그 밖의 제재수준 차이:" : "국가·지방의 제재수준(기간·율·금액·벌점)이 다음 항목에서 다릅니다:";
+        box.appendChild(msg2);
+        const ul = document.createElement("ul");
+        ul.className = "ts-list";
+        diffs.forEach(function (r) {
+          const li = document.createElement("li");
+          const tag = document.createElement("span");
+          tag.className = "ts-cat";
+          tag.textContent = r.kind;
+          li.appendChild(tag);
+          li.appendChild(txt(" 국가 "));
+          li.appendChild(quote(joinVals(r.aOnly)));
+          li.appendChild(txt(" ↔ 지방 "));
+          li.appendChild(quote(joinVals(r.bOnly)));
+          ul.appendChild(li);
+        });
+        box.appendChild(ul);
+      }
+
+      const disc = document.createElement("p");
+      disc.className = "ts-disc";
+      disc.textContent = "※ 조문·별표의 제재 관련 수치(기간·율·금액·벌점)를 기계적으로 대조한 결과이며 법적 해석이 아닙니다. '—'는 그쪽 조문·별표에서 해당 수치가 검출되지 않았다는 뜻이며, 부수적 수치가 섞일 수 있으니 정확한 맥락은 아래 원문·별표를 확인하세요.";
+      box.appendChild(disc);
+      return box;
+    }
+
+    // 여러 계층을 한 쪽(국가/지방)으로 병합 — 통합 핵심 차이 산출용
+    function mergeSides(tiers, which) {
+      return {
+        text: tiers.map(function (t) { return t[which].text || ""; }).join(" "),
+        tables: tiers.reduce(function (acc, t) { return acc.concat(t[which].tables || []); }, [])
+      };
+    }
+
+    // 선택된 주제의 3계층을 렌더링한다.
+    function renderComparison(topicId) {
+      compareRoot.innerHTML = "";
+      if (!topicId) {
+        compareRoot.innerHTML = '<p class="empty-hint">위에서 비교할 주제를 선택하세요.</p>';
+        return;
+      }
+      const item = LAW_DATA.find(function (d) { return d.id === topicId; });
+      if (!item || !Array.isArray(item.tiers)) {
+        compareRoot.innerHTML = '<p class="empty-hint">선택한 주제의 데이터를 표시할 수 없습니다. (데이터 형식 확인 필요)</p>';
+        return;
+      }
+
+      // 모든 주제: 3계층(법률·시행령·시행규칙)을 통합한 '핵심 차이' 표 1개를 최상단에 표시하고, 계층별 요약은 생략
+      const isGuarantee = (topicId === "bid-guarantee" || topicId === "contract-guarantee");
+      const topSummary = isGuarantee
+        ? buildGuaranteeSummary(topicId, item.tiers)
+        : buildTierSummary(mergeSides(item.tiers, "national"), mergeSides(item.tiers, "local"), topicId);
+      if (topSummary) compareRoot.appendChild(topSummary);
+
+      // 핵심 차이 아래에 '동향 살펴보기' 접이식 패널(공식 출처 링크)을 둔다.
+      compareRoot.appendChild(buildTrendPanel(item));
+
+      item.tiers.forEach(function (tier) {
+        const section = document.createElement("section");
+        section.className = "tier";
+
+        const head = document.createElement("div");
+        head.className = "tier-head";
+        const h3 = document.createElement("h3");
+        h3.className = "tier-label";
+        h3.textContent = tier.label;   // 법률 / 시행령 / 시행규칙
+        head.appendChild(h3);
+
+        const compare = document.createElement("div");
+        compare.className = "compare";
+        const artNo = tier.articleNo || {};
+        const names = TIER_LAW_NAMES[tier.key] || { national: "국가계약법령", local: "지방계약법령" };
+        const natCol = makeColumn(names.national, artNo.national);   // 좌
+        const locCol = makeColumn(names.local, artNo.local);         // 우
+        compare.appendChild(natCol.col);
+        compare.appendChild(locCol.col);
+
+        fillPair(natCol.body, locCol.body, tier.national, tier.local, head);
+
+        section.appendChild(head);
+        section.appendChild(compare);
+        compareRoot.appendChild(section);
+      });
+    }
+
+    topicSelect.addEventListener("change", function () { renderComparison(this.value); });
+
+    // ===== 데이터 소스에 맞춰 초기화 =====
+    function initApp(doc) {
+      LAW_DATA = (doc && Array.isArray(doc.topics)) ? doc.topics : [];
+
+      if (!doc || doc.source === "example") {
+        dataNotice.innerHTML = "※ 현재 조문은 기능 확인용 <strong>예시(합성) 데이터</strong>입니다. 실제 법령 원문이 아니며, 유권해석 근거로 쓸 수 없습니다.";
+      } else {
+        dataNotice.textContent = "출처: 법제처 국가법령정보 공동활용 API" + (doc.generatedAt ? " (수집일 " + doc.generatedAt + ")" : "");
+      }
+      dataNotice.hidden = false;
+
+      topicSelect.innerHTML = "";
+      const def = document.createElement("option");
+      def.value = ""; def.textContent = "주제를 선택하세요";
+      topicSelect.appendChild(def);
+      LAW_DATA.forEach(function (item) {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.title;
+        topicSelect.appendChild(option);
+      });
+
+      // 데이터가 비어 있으면(형식 이상 등) 조용히 두지 않고 안내
+      if (LAW_DATA.length === 0) {
+        compareRoot.innerHTML = '<p class="empty-hint">표시할 비교 주제가 없습니다. data.json 을 확인하세요.</p>';
+        return;
+      }
+
+      renderComparison("");
+    }
+
+    // data.json 로드 → 실패 시 안내
+    fetch("./data.json")
+      .then(function (r) { if (!r.ok) throw new Error("load failed"); return r.json(); })
+      .then(function (doc) { initApp(doc); })
+      .catch(function () {
+        dataNotice.hidden = false;
+        dataNotice.textContent = "데이터를 불러오지 못했습니다.";
+        compareRoot.innerHTML = '<p class="empty-hint">data.json 을 불러오지 못했습니다.<br>파일을 더블클릭(file://) 대신 로컬 서버(<code>node serve.js</code> → http://127.0.0.1:8000)로 열어주세요.</p>';
+      });
+  </script>
+</body>
+</html>

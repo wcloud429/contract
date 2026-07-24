@@ -1,0 +1,15 @@
+# Vercel 업로드에서 제외 — 비밀 파일은 절대 올리지 않는다(이중 안전장치).
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# 로컬 도구·휴지통·상태 폴더
+.bkit/
+.claude/
+trash-can/
+
+# 로컬 확인용 스크립트(배포엔 불필요) — data.json/index.html 은 빌드가 사용하므로 남긴다
+serve.js
